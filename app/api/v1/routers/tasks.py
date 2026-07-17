@@ -1,51 +1,68 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.schemas.task import Task, TaskCreate
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_session
+from app.models.task import Task
+from app.repositories.base import BaseRepository
+from app.schemas.task import TaskCreate, TaskRead
+from sqlalchemy.exc import IntegrityError
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-MOCK_TASKS = [
-    {"id": 1, "title": "DB design", "status": "DONE"},
-    {"id": 2, "title": "API Login", "status": "IN_PROGRESS"},
-    {"id": 3, "title": "Docker setup", "status": "TODO"},
-]
+
+def get_task_repo(session: AsyncSession = Depends(get_session)) -> BaseRepository[Task]:
+    return BaseRepository(Task, session)
 
 
-def get_task(task_id: int) -> dict:
-    for task in MOCK_TASKS:
-        if task["id"] == task_id:
-            return task
-    raise HTTPException(status_code=404, detail="Task not found")
-
-
-def get_next_task_id() -> int:
-    return max(task["id"] for task in MOCK_TASKS) + 1
-
-
-@router.get("/", response_model=list[Task])
-async def get_tasks():
-    return MOCK_TASKS
-
-
-@router.get("/{task_id}", response_model=Task)
-async def get_task_by_id(task: dict = Depends(get_task)):
+async def get_task_or_404(
+    task_id: int, repo: BaseRepository[Task] = Depends(get_task_repo)
+) -> Task:
+    task = await repo.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
     return task
 
 
-@router.post("/", response_model=Task, status_code=201)
-async def create_task(task: TaskCreate):
-    new_task = {"id": get_next_task_id(), "title": task.title, "status": task.status}
-    MOCK_TASKS.append(new_task)
-    return new_task
+@router.get("/", response_model=list[TaskRead])
+async def list_tasks(repo: BaseRepository[Task] = Depends(get_task_repo)):
+    tasks, _ = await repo.list_paginated()
+    return tasks
 
 
-@router.put("/{task_id}", response_model=Task)
-async def update_task(payload: TaskCreate, task: dict = Depends(get_task)):
-    task["title"] = payload.title
-    task["status"] = payload.status
+@router.post("/", response_model=TaskRead, status_code=201)
+async def create_task(
+    payload: TaskCreate, repo: BaseRepository[Task] = Depends(get_task_repo)
+):
+    task = Task(**payload.model_dump())
+    try:
+        return await repo.create(task)
+    except IntegrityError:
+        await repo.session.rollback()
+        raise HTTPException(
+            status_code=400, detail="project_id or assignee_id không tồn tại"
+        )
+
+
+@router.get("/{task_id}", response_model=TaskRead)
+async def get_task(task: Task = Depends(get_task_or_404)):
     return task
+
+
+@router.put("/{task_id}", response_model=TaskRead)
+async def update_task(
+    payload: TaskCreate,
+    task: Task = Depends(get_task_or_404),
+    repo: BaseRepository[Task] = Depends(get_task_repo),
+):
+    for field, value in payload.model_dump().items():
+        setattr(task, field, value)
+    updated_task = await repo.update(task)
+    return updated_task
 
 
 @router.delete("/{task_id}", status_code=204)
-async def delete_task(task: dict = Depends(get_task)):
-    MOCK_TASKS.remove(task)
-    return None
+async def delete_task(
+    task: Task = Depends(get_task_or_404),
+    repo: BaseRepository[Task] = Depends(get_task_repo),
+):
+    await repo.delete(task)
