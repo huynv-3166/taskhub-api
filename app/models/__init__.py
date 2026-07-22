@@ -5,6 +5,7 @@ from app.models.task import Task
 from app.models.label import Label
 from app.models.comment import Comment
 from app.models.project import Project
+from app.models.refresh_token import RefreshToken
 
 __all__ = [
     "User",
@@ -14,4 +15,5 @@ __all__ = [
     "Label",
     "Comment",
     "Project",
+    "RefreshToken",
 ]
