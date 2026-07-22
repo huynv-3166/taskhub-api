@@ -1,13 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.dependencies.auth import get_current_user
 from app.core.database import get_session
 from app.models.task import Task
 from app.repositories.base import BaseRepository
 from app.schemas.task import TaskCreate, TaskRead
-from sqlalchemy.exc import IntegrityError
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter(
+    prefix="/tasks",
+    tags=["tasks"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def get_task_repo(session: AsyncSession = Depends(get_session)) -> BaseRepository[Task]:
